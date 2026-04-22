@@ -20,9 +20,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb fluxbox x11vnc novnc websockify \
     # Utilidades
     supervisor tini procps net-tools python3 \
-    # JRE para StrategyQuant (viene con la app pero por si acaso)
+    # dbus para machine-id (SQX lo lee para Hardware ID)
+    dbus \
+    # JRE de respaldo (la app trae su propio JRE en /opt/sqx/j64)
     openjdk-17-jre-headless \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # Crear machine-id fijo: evita que SQX falle y estabiliza el Hardware ID
+    # entre rebuilds (importante para la licencia).
+    && mkdir -p /var/lib/dbus \
+    && dbus-uuidgen > /etc/machine-id \
+    && cp /etc/machine-id /var/lib/dbus/machine-id
 
 WORKDIR ${SQX_HOME}
 

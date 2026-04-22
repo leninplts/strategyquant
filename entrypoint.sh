@@ -2,7 +2,7 @@
 set -e
 
 echo "============================================================"
-echo ">>> ENTRYPOINT v2 iniciado ($(date))"
+echo ">>> ENTRYPOINT v3 iniciado ($(date))"
 echo "============================================================"
 
 cd /opt/sqx
@@ -15,13 +15,27 @@ VNC_RESOLUTION="${VNC_RESOLUTION:-1600x900}"
 VNC_COL_DEPTH="${VNC_COL_DEPTH:-24}"
 VNC_PASSWORD="${VNC_PASSWORD:-changeme}"
 
-LICENSE_MARKER="/opt/sqx/user/.license_activated"
+# ---------- machine-id persistente ----------
+# SQX lee /var/lib/dbus/machine-id para calcular el Hardware ID.
+# Si no existe, crashea. Lo persistimos en el volumen /opt/sqx/user
+# para que el Hardware ID sea estable aunque reconstruyas la imagen.
+mkdir -p /opt/sqx/user
+if [ ! -f /opt/sqx/user/.machine-id ]; then
+    if [ -s /etc/machine-id ]; then
+        cp /etc/machine-id /opt/sqx/user/.machine-id
+    else
+        dbus-uuidgen > /opt/sqx/user/.machine-id
+    fi
+    echo ">>> Generado nuevo machine-id persistente."
+fi
+mkdir -p /var/lib/dbus
+cp /opt/sqx/user/.machine-id /etc/machine-id
+cp /opt/sqx/user/.machine-id /var/lib/dbus/machine-id
+echo ">>> machine-id: $(cat /etc/machine-id)"
 
-# ---------- DEBUG: listar contenido de /opt/sqx ----------
+# ---------- DEBUG: listar /opt/sqx ----------
 echo ">>> Contenido de /opt/sqx:"
 ls -la /opt/sqx || true
-echo ">>> Ejecutables encontrados (depth <= 3):"
-find /opt/sqx -maxdepth 3 -type f \( -perm -u+x -o -name "*.sh" \) 2>/dev/null | head -50 || true
 echo "============================================================"
 
 # ---------- Xvfb ----------
@@ -29,7 +43,6 @@ echo ">>> Iniciando Xvfb en $DISPLAY ($VNC_RESOLUTION x $VNC_COL_DEPTH)..."
 Xvfb "$DISPLAY" -screen 0 "${VNC_RESOLUTION}x${VNC_COL_DEPTH}" -ac +extension RANDR &
 XVFB_PID=$!
 
-# Esperar a que Xvfb esté listo
 for i in $(seq 1 40); do
     if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
         echo ">>> Xvfb listo tras ${i} intentos."
@@ -64,55 +77,40 @@ sleep 1
 echo ">>> noVNC corriendo. Abrir: http://<host>:${NOVNC_PORT}/vnc.html"
 echo ">>> VNC password: $VNC_PASSWORD"
 
-# ---------- Activación de licencia (solo si hace falta) ----------
-mkdir -p /opt/sqx/user
-if [ ! -f "$LICENSE_MARKER" ] && [ -n "$SQX_LICENSE" ] && [ -x "./sqcli" ]; then
-    echo ">>> Activando licencia SQX vía sqcli..."
-    ./sqcli license="$SQX_LICENSE" || echo "WARN: fallo al activar licencia"
-    touch "$LICENSE_MARKER"
-fi
-
-# ---------- Buscar GUI de StrategyQuant X ----------
-# Excluimos explícitamente sqcli (que es el CLI).
+# ---------- Buscar GUI ----------
+# Prioridad: StrategyQuantX > StrategyQuantX_nocheck (modo debug).
+# NUNCA sqcli (es el CLI).
 SQX_BIN=""
 for cand in \
     ./StrategyQuantX \
+    ./StrategyQuantX_nocheck \
     ./strategyquantx \
     ./StrategyQuantX.sh \
     ./strategyquantx.sh \
     ./run.sh \
-    ./start.sh \
-    ./sqx \
-    ./SQX; do
+    ./start.sh; do
     if [ -x "$cand" ] && [ "$(basename "$cand")" != "sqcli" ]; then
         SQX_BIN="$cand"
         break
     fi
 done
 
-# Si no hay launcher dedicado, buscar recursivamente cualquier ejecutable
-# cuyo nombre contenga "StrategyQuant" (pero NO sqcli)
-if [ -z "$SQX_BIN" ]; then
-    SQX_BIN=$(find /opt/sqx -maxdepth 4 -type f -iname "*strategyquant*" \
-              ! -iname "*sqcli*" -perm -u+x 2>/dev/null | head -1)
-fi
-
 if [ -z "$SQX_BIN" ]; then
     echo "============================================================"
     echo "ERROR: NO se encontró launcher de la GUI."
-    echo "Mantengo Xvfb+VNC+noVNC vivos para que puedas conectar y debuggear."
-    echo "Abre http://<host>:${NOVNC_PORT}/vnc.html y verás escritorio vacío."
+    echo "Mantengo noVNC vivo para debug."
     echo "============================================================"
-    # Mantener contenedor vivo
     wait "$NOVNC_PID"
     exit 1
 fi
 
 echo "============================================================"
-echo ">>> Lanzador GUI detectado: $SQX_BIN"
+echo ">>> Launcher GUI: $SQX_BIN"
+echo ">>> Hardware ID se basará en machine-id: $(cat /etc/machine-id)"
 echo ">>> Abre en navegador: http://<host>:${NOVNC_PORT}/vnc.html"
 echo ">>> VNC password: $VNC_PASSWORD"
+echo ">>> La licencia se activa DESDE LA GUI al abrirla (no intento activar por CLI)."
 echo "============================================================"
 
-# Ejecutar SQX GUI en primer plano
+# Lanzar la GUI en primer plano
 exec "$SQX_BIN"

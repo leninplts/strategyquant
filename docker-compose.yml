@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  sqx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sqx
+    restart: unless-stopped
+    volumes:
+      - sqx_user:/opt/sqx/user
+      - sqx_projects:/opt/sqx/projects
+      - sqx_data:/opt/sqx/data
+      - sqx_logs:/opt/sqx/logs
+      - sqx_config:/opt/sqx/config
+    ports:
+      - "8090:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 24G
+          cpus: "6"
+        reservations:
+          memory: 8G
+
+volumes:
+  sqx_user:
+  sqx_projects:
+  sqx_data:
+  sqx_logs:
+  sqx_config:

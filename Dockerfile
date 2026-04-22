@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR ${SQX_HOME}
 
-COPY vendor/strategyquantx-linux.zip /tmp/sqx.zip
+COPY vendor/SQX_143_linux_20260115.zip /tmp/sqx.zip
 RUN unzip -q /tmp/sqx.zip -d ${SQX_HOME} \
     && rm /tmp/sqx.zip \
     && find ${SQX_HOME} -maxdepth 2 -name "sqcli" -exec chmod +x {} \; \

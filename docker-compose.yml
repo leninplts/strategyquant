@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        SQX_ZIP_URL: ${SQX_ZIP_URL}
     container_name: sqx
     restart: unless-stopped
     volumes:
@@ -14,7 +16,9 @@ services:
       - sqx_logs:/opt/sqx/logs
       - sqx_config:/opt/sqx/config
     ports:
-      - "8090:8080"
+      - "8090:8090"
+    environment:
+      - TZ=America/Lima
     deploy:
       resources:
         limits:

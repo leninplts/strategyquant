@@ -37,9 +37,32 @@ services:
         reservations:
           memory: 8G
 
+  # Sidecar: File Browser para descargar estrategias exportadas desde el navegador.
+  # Acceso: http://host:8091  (login inicial: admin / admin -> cambialo al entrar)
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: sqx_filebrowser
+    restart: unless-stopped
+    ports:
+      - "8091:80"
+    volumes:
+      # Montamos los mismos volúmenes que sqx, en solo-lectura donde tiene sentido
+      - sqx_user:/srv/user
+      - sqx_projects:/srv/projects
+      - sqx_data:/srv/data:ro
+      - sqx_logs:/srv/logs:ro
+      # Config persistente de filebrowser (usuarios, settings)
+      - sqx_filebrowser_cfg:/database
+    environment:
+      - FB_DATABASE=/database/filebrowser.db
+      - FB_ROOT=/srv
+    depends_on:
+      - sqx
+
 volumes:
   sqx_user:
   sqx_projects:
   sqx_data:
   sqx_logs:
   sqx_config:
+  sqx_filebrowser_cfg:

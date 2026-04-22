@@ -10,25 +10,24 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VNC_RESOLUTION=1600x900 \
     VNC_COL_DEPTH=24
 
+# Paquetes base + X11 + Xvfb/VNC/noVNC + dependencias de Electron
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates wget curl \
-    libarchive-tools \
-    # X11 libs que SQX necesita
-    libxrender1 libxtst6 libxi6 libxext6 libxrandr2 libxfixes3 libxcomposite1 libxcursor1 libxdamage1 libxkbcommon0 \
+    ca-certificates wget curl libarchive-tools tini procps net-tools python3 \
+    # X11
+    libxrender1 libxtst6 libxi6 libxext6 libxrandr2 libxfixes3 \
+    libxcomposite1 libxcursor1 libxdamage1 libxkbcommon0 \
     libfreetype6 fontconfig fonts-dejavu fonts-liberation \
     # Display virtual + WM + VNC + noVNC
-    xvfb x11-utils fluxbox x11vnc novnc websockify xauth \
-    # Dependencias de Electron (strategyquantx_ui es una app Electron)
+    xvfb x11-utils xauth fluxbox x11vnc novnc websockify \
+    # Electron / Chromium
     libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 \
     libpango-1.0-0 libpangocairo-1.0-0 libcairo2 \
     libnss3 libnspr4 libxshmfence1 libasound2 \
-    libgtk-3-0 libglib2.0-0 libgdk-pixbuf-2.0-0 \
-    libatspi2.0-0 \
-    # Utilidades
-    tini procps net-tools python3 \
-    # dbus (machine-id para Hardware ID)
-    dbus \
-    # JRE de respaldo
+    libgtk-3-0 libglib2.0-0 libgdk-pixbuf-2.0-0 libatspi2.0-0 \
+    # Módulos nativos Node/Electron
+    libsecret-1-0 libnotify4 libuuid1 \
+    # dbus + JRE respaldo
+    dbus dbus-x11 \
     openjdk-17-jre-headless \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/lib/dbus \
@@ -45,8 +44,9 @@ RUN test -n "${SQX_ZIP_URL}" || (echo "ERROR: SQX_ZIP_URL no está definido" && 
     && bsdtar -xf /tmp/sqx.zip -C ${SQX_HOME} \
     && rm /tmp/sqx.zip \
     && find ${SQX_HOME} -maxdepth 3 -name "sqcli" -exec chmod +x {} \; \
-    && find ${SQX_HOME} -maxdepth 3 -name "StrategyQuantX" -exec chmod +x {} \; \
-    && find ${SQX_HOME} -maxdepth 3 -name "*.sh" -exec chmod +x {} \;
+    && find ${SQX_HOME} -maxdepth 3 -name "StrategyQuantX*" -exec chmod +x {} \; \
+    && find ${SQX_HOME} -maxdepth 3 -name "*.sh" -exec chmod +x {} \; \
+    && find ${SQX_HOME}/internal/electron -maxdepth 2 -type f -name "strategyquantx_ui*" -exec chmod +x {} \; 2>/dev/null || true
 
 ENV SQ_JVM_XMX=16g
 
@@ -54,7 +54,7 @@ ENV SQ_JVM_XMX=16g
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Puerto noVNC (web UI via VNC), VNC directo, y API HTTP interna de SQX
+# noVNC (web), VNC directo, API interna de SQX
 EXPOSE 8090 5901 5050
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

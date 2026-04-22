@@ -2,7 +2,7 @@
 set -e
 
 echo "============================================================"
-echo ">>> ENTRYPOINT v4 iniciado ($(date))"
+echo ">>> ENTRYPOINT v5 iniciado ($(date))"
 echo "============================================================"
 
 cd /opt/sqx
@@ -37,28 +37,47 @@ cp /opt/sqx/user/.machine-id /etc/machine-id
 cp /opt/sqx/user/.machine-id /var/lib/dbus/machine-id
 echo ">>> machine-id: $(cat /etc/machine-id)"
 
-# ---------- Wrap de Electron para forzar --no-sandbox ----------
-# Electron necesita --no-sandbox en contenedores sin SYS_ADMIN/userns.
-# SQX llama al binario directamente, así que lo reemplazamos con un wrapper.
+# ---------- Revertir wrapper de Electron si existe (intento previo) ----------
+# strategyquantx_ui tiene protección anti-tampering: detecta si no lo lanza
+# StrategyQuantX directamente. El wrapper bash rompe esa verificación.
 ELECTRON_BIN="/opt/sqx/internal/electron/strategyquantx_ui"
 ELECTRON_REAL="/opt/sqx/internal/electron/strategyquantx_ui.real"
-if [ -f "$ELECTRON_BIN" ] && [ ! -f "$ELECTRON_REAL" ]; then
-    echo ">>> Creando wrapper de Electron con --no-sandbox..."
-    mv "$ELECTRON_BIN" "$ELECTRON_REAL"
-    cat > "$ELECTRON_BIN" << 'WRAP'
-#!/bin/bash
-exec /opt/sqx/internal/electron/strategyquantx_ui.real \
-    --no-sandbox \
-    --disable-gpu \
-    --disable-dev-shm-usage \
-    --disable-software-rasterizer \
-    "$@"
-WRAP
+if [ -f "$ELECTRON_REAL" ]; then
+    echo ">>> Revirtiendo wrapper previo de Electron..."
+    mv -f "$ELECTRON_REAL" "$ELECTRON_BIN"
     chmod +x "$ELECTRON_BIN"
 fi
-# Variables de entorno para Electron
+
+# ---------- Variables para Electron ----------
+# Electron respeta ELECTRON_DISABLE_SANDBOX (equivalente a --no-sandbox).
+# No tocamos argv porque SQX pasa args posicionales (token de handshake).
 export ELECTRON_DISABLE_SANDBOX=1
 export ELECTRON_ENABLE_LOGGING=1
+# GTK / Chromium: evitar accelerated rendering en contenedor sin GPU.
+export LIBGL_ALWAYS_SOFTWARE=1
+
+# ---------- dbus session bus ----------
+# Electron se queja de /run/dbus/system_bus_socket. Iniciamos dbus de sesión
+# (suele bastar para silenciar los errores y que arranque la UI).
+mkdir -p /run/dbus
+if [ ! -S /run/dbus/system_bus_socket ]; then
+    echo ">>> Iniciando dbus-daemon de sistema..."
+    dbus-daemon --system --fork 2>/dev/null || echo "WARN: no se pudo arrancar dbus system"
+fi
+# dbus de sesión (usuario)
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+    eval "$(dbus-launch --sh-syntax 2>/dev/null)" || true
+    export DBUS_SESSION_BUS_ADDRESS
+fi
+echo ">>> DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
+
+# ---------- Diagnóstico de Electron ----------
+if [ -f "$ELECTRON_BIN" ]; then
+    echo ">>> ldd de strategyquantx_ui (solo 'not found'):"
+    ldd "$ELECTRON_BIN" 2>/dev/null | grep -i "not found" || echo "    (todas las libs encontradas ✓)"
+    echo ">>> Listado de ASAR / resources:"
+    ls -la /opt/sqx/internal/electron/ 2>/dev/null | head -30 || true
+fi
 
 # ---------- Diagnóstico de entorno ----------
 echo ">>> Diagnóstico:"

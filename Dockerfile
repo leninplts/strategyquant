@@ -27,7 +27,10 @@ RUN test -n "${SQX_ZIP_URL}" || (echo "ERROR: SQX_ZIP_URL no está definido" && 
 
 ENV SQ_JVM_XMX=16g
 
+# Entrypoint script: activa licencia si es necesario, luego levanta el webserver
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8090
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["./sqcli", "-gui", "port=8090"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

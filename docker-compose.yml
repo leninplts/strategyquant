@@ -19,6 +19,7 @@ services:
       - "8090:8090"
     environment:
       - TZ=America/Lima
+      - SQX_LICENSE=${SQX_LICENSE}
     deploy:
       resources:
         limits:

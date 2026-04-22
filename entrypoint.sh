@@ -37,6 +37,29 @@ cp /opt/sqx/user/.machine-id /etc/machine-id
 cp /opt/sqx/user/.machine-id /var/lib/dbus/machine-id
 echo ">>> machine-id: $(cat /etc/machine-id)"
 
+# ---------- Wrap de Electron para forzar --no-sandbox ----------
+# Electron necesita --no-sandbox en contenedores sin SYS_ADMIN/userns.
+# SQX llama al binario directamente, así que lo reemplazamos con un wrapper.
+ELECTRON_BIN="/opt/sqx/internal/electron/strategyquantx_ui"
+ELECTRON_REAL="/opt/sqx/internal/electron/strategyquantx_ui.real"
+if [ -f "$ELECTRON_BIN" ] && [ ! -f "$ELECTRON_REAL" ]; then
+    echo ">>> Creando wrapper de Electron con --no-sandbox..."
+    mv "$ELECTRON_BIN" "$ELECTRON_REAL"
+    cat > "$ELECTRON_BIN" << 'WRAP'
+#!/bin/bash
+exec /opt/sqx/internal/electron/strategyquantx_ui.real \
+    --no-sandbox \
+    --disable-gpu \
+    --disable-dev-shm-usage \
+    --disable-software-rasterizer \
+    "$@"
+WRAP
+    chmod +x "$ELECTRON_BIN"
+fi
+# Variables de entorno para Electron
+export ELECTRON_DISABLE_SANDBOX=1
+export ELECTRON_ENABLE_LOGGING=1
+
 # ---------- Diagnóstico de entorno ----------
 echo ">>> Diagnóstico:"
 echo "    Usuario: $(id)"

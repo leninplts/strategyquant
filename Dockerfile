@@ -14,21 +14,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates wget curl \
     libarchive-tools \
     # X11 libs que SQX necesita
-    libxrender1 libxtst6 libxi6 libxext6 libxrandr2 \
-    libfreetype6 fontconfig fonts-dejavu \
+    libxrender1 libxtst6 libxi6 libxext6 libxrandr2 libxfixes3 libxcomposite1 libxcursor1 libxdamage1 libxkbcommon0 \
+    libfreetype6 fontconfig fonts-dejavu fonts-liberation \
     # Display virtual + WM + VNC + noVNC
-    xvfb x11-utils fluxbox x11vnc novnc websockify \
-    # xauth es necesario para algunas apps Java con Xvfb
-    xauth \
+    xvfb x11-utils fluxbox x11vnc novnc websockify xauth \
+    # Dependencias de Electron (strategyquantx_ui es una app Electron)
+    libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 \
+    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 \
+    libnss3 libnspr4 libxshmfence1 libasound2 \
+    libgtk-3-0 libglib2.0-0 libgdk-pixbuf-2.0-0 \
+    libatspi2.0-0 \
     # Utilidades
-    supervisor tini procps net-tools python3 \
-    # dbus para machine-id (SQX lo lee para Hardware ID)
+    tini procps net-tools python3 \
+    # dbus (machine-id para Hardware ID)
     dbus \
-    # JRE de respaldo (la app trae su propio JRE en /opt/sqx/j64)
+    # JRE de respaldo
     openjdk-17-jre-headless \
     && rm -rf /var/lib/apt/lists/* \
-    # Crear machine-id fijo: evita que SQX falle y estabiliza el Hardware ID
-    # entre rebuilds (importante para la licencia).
     && mkdir -p /var/lib/dbus \
     && dbus-uuidgen > /etc/machine-id \
     && cp /etc/machine-id /var/lib/dbus/machine-id
@@ -52,7 +54,7 @@ ENV SQ_JVM_XMX=16g
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Puerto noVNC (web) y VNC directo (por si quieres conectar con cliente nativo)
-EXPOSE 8090 5901
+# Puerto noVNC (web UI via VNC), VNC directo, y API HTTP interna de SQX
+EXPOSE 8090 5901 5050
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

@@ -18,8 +18,10 @@ services:
     ports:
       # noVNC web UI -> abrir en navegador: http://host:8090/vnc.html
       - "8090:8090"
-      # VNC nativo (opcional, por si quieres usar un cliente VNC)
+      # VNC nativo (opcional, cliente VNC tradicional)
       - "5901:5901"
+      # API HTTP interna de SQX (opcional, para llamadas /call?cmd=...)
+      - "5050:5050"
     environment:
       - TZ=America/Lima
       - SQX_LICENSE=${SQX_LICENSE}

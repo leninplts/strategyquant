@@ -3,14 +3,25 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive \
     SQX_HOME=/opt/sqx \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    DISPLAY=:1 \
+    VNC_PORT=5901 \
+    NOVNC_PORT=8090 \
+    VNC_RESOLUTION=1600x900 \
+    VNC_COL_DEPTH=24
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates wget \
+    ca-certificates wget curl \
     libarchive-tools \
+    # X11 libs que SQX necesita
     libxrender1 libxtst6 libxi6 libxext6 libxrandr2 \
     libfreetype6 fontconfig fonts-dejavu \
-    tini \
+    # Display virtual + WM + VNC + noVNC
+    xvfb fluxbox x11vnc novnc websockify \
+    # Utilidades
+    supervisor tini procps net-tools python3 \
+    # JRE para StrategyQuant (viene con la app pero por si acaso)
+    openjdk-17-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR ${SQX_HOME}
@@ -23,14 +34,16 @@ RUN test -n "${SQX_ZIP_URL}" || (echo "ERROR: SQX_ZIP_URL no está definido" && 
     && bsdtar -xf /tmp/sqx.zip -C ${SQX_HOME} \
     && rm /tmp/sqx.zip \
     && find ${SQX_HOME} -maxdepth 3 -name "sqcli" -exec chmod +x {} \; \
-    && find ${SQX_HOME} -maxdepth 3 -name "StrategyQuantX" -exec chmod +x {} \;
+    && find ${SQX_HOME} -maxdepth 3 -name "StrategyQuantX" -exec chmod +x {} \; \
+    && find ${SQX_HOME} -maxdepth 3 -name "*.sh" -exec chmod +x {} \;
 
 ENV SQ_JVM_XMX=16g
 
-# Entrypoint script: activa licencia si es necesario, luego levanta el webserver
+# Entrypoint
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 8090
+# Puerto noVNC (web) y VNC directo (por si quieres conectar con cliente nativo)
+EXPOSE 8090 5901
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

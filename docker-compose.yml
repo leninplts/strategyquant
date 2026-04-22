@@ -16,10 +16,17 @@ services:
       - sqx_logs:/opt/sqx/logs
       - sqx_config:/opt/sqx/config
     ports:
+      # noVNC web UI -> abrir en navegador: http://host:8090/vnc.html
       - "8090:8090"
+      # VNC nativo (opcional, por si quieres usar un cliente VNC)
+      - "5901:5901"
     environment:
       - TZ=America/Lima
       - SQX_LICENSE=${SQX_LICENSE}
+      - VNC_PASSWORD=${VNC_PASSWORD:-changeme}
+      - VNC_RESOLUTION=${VNC_RESOLUTION:-1600x900}
+      - VNC_COL_DEPTH=24
+    shm_size: "1gb"
     deploy:
       resources:
         limits:

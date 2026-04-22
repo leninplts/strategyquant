@@ -1,9 +1,10 @@
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    SQX_HOME=/opt/sqx
+    SQX_HOME=/opt/sqx \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
-# bsdtar (libarchive-tools) maneja mejor los ZIPs con nombres Unicode
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates wget \
     libarchive-tools \

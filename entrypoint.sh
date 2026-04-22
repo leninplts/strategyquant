@@ -37,11 +37,39 @@ cp /opt/sqx/user/.machine-id /etc/machine-id
 cp /opt/sqx/user/.machine-id /var/lib/dbus/machine-id
 echo ">>> machine-id: $(cat /etc/machine-id)"
 
+# ---------- Diagnóstico de entorno ----------
+echo ">>> Diagnóstico:"
+echo "    Usuario: $(id)"
+echo "    /tmp permisos: $(ls -ld /tmp)"
+echo "    /tmp/.X11-unix: $(ls -ld /tmp/.X11-unix 2>/dev/null || echo 'no existe')"
+echo "    /dev/shm: $(ls -ld /dev/shm 2>/dev/null || echo 'no existe')"
+echo "    /dev/shm size: $(df -h /dev/shm 2>/dev/null | tail -1 || echo 'n/a')"
+echo "    which Xvfb: $(which Xvfb)"
+echo "    Xvfb version: $(Xvfb -version 2>&1 | head -3 || true)"
+
 # ---------- Xvfb ----------
 echo ">>> Iniciando Xvfb en $DISPLAY ($VNC_RESOLUTION x $VNC_COL_DEPTH)..."
+# Primero intento en foreground para capturar cualquier error
 Xvfb "$DISPLAY" -screen 0 "${VNC_RESOLUTION}x${VNC_COL_DEPTH}" -ac +extension RANDR \
+    +extension GLX -nolisten tcp \
     > /tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
+
+# Dar tiempo inicial
+sleep 2
+
+# Ver si el proceso sigue vivo
+if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+    echo "ERROR: Xvfb murió inmediatamente. Log completo:"
+    echo "----- /tmp/xvfb.log -----"
+    cat /tmp/xvfb.log 2>&1 || echo "(log vacío o inaccesible)"
+    echo "----- fin log -----"
+    echo "----- intentando arrancar en foreground para ver error directo -----"
+    Xvfb "$DISPLAY" -screen 0 "${VNC_RESOLUTION}x${VNC_COL_DEPTH}" -ac 2>&1 | head -30 || true
+    echo "----- fin -----"
+    echo ">>> Manteniendo contenedor vivo para debug (tail -f)..."
+    tail -f /dev/null
+fi
 
 for i in $(seq 1 60); do
     if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
@@ -52,9 +80,10 @@ for i in $(seq 1 60); do
 done
 
 if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
-    echo "ERROR: Xvfb no arrancó. Log:"
-    cat /tmp/xvfb.log || true
-    exit 1
+    echo "ERROR: Xvfb arrancó pero no responde. Log:"
+    cat /tmp/xvfb.log 2>&1 || true
+    echo ">>> Manteniendo contenedor vivo para debug..."
+    tail -f /dev/null
 fi
 
 # ---------- Window manager ----------

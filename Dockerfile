@@ -17,7 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 libxtst6 libxi6 libxext6 libxrandr2 \
     libfreetype6 fontconfig fonts-dejavu \
     # Display virtual + WM + VNC + noVNC
-    xvfb fluxbox x11vnc novnc websockify \
+    xvfb x11-utils fluxbox x11vnc novnc websockify \
+    # xauth es necesario para algunas apps Java con Xvfb
+    xauth \
     # Utilidades
     supervisor tini procps net-tools python3 \
     # dbus para machine-id (SQX lo lee para Hardware ID)

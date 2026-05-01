@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Paquetes base + X11 + Xvfb/VNC/noVNC + dependencias de Electron
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates wget curl libarchive-tools tini procps net-tools python3 \
+    ca-certificates wget curl libarchive-tools tini procps net-tools python3 netcat-openbsd \
     # X11
     libxrender1 libxtst6 libxi6 libxext6 libxrandr2 libxfixes3 \
     libxcomposite1 libxcursor1 libxdamage1 libxkbcommon0 \
@@ -56,5 +56,10 @@ RUN chmod +x /entrypoint.sh
 
 # noVNC (web), VNC directo, API interna de SQX
 EXPOSE 8090 5901 5050
+
+# Healthcheck: verifica que noVNC y x11vnc respondan TCP.
+# start_period=2m da tiempo a SQX a arrancar la primera vez.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=2m --retries=3 \
+    CMD nc -z localhost 5901 && nc -z localhost 8090 || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

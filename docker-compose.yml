@@ -38,10 +38,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 24G
-          cpus: "6"
+          memory: 4G
+          cpus: "3"
         reservations:
-          memory: 8G
+          memory: 2G
 
   # Sidecar: File Browser para descargar estrategias exportadas desde el navegador.
   # Acceso: http://host:8091  (login inicial: admin / admin -> cambialo al entrar)

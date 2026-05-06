@@ -84,22 +84,32 @@ volumes:
   sqx_filebrowser_cfg:
 
 # ------------------------------------------------------------
-# NOTAS DE DESPLIEGUE EN HOST ARM64 (Oracle Ampere A1)
+# NOTAS DE DESPLIEGUE EN HOST ARM64 (Oracle Ampere A1 + Dokploy)
 # ------------------------------------------------------------
-# StrategyQuant X solo tiene build oficial para x86_64. En esta
-# instancia ARM64 se ejecuta vía emulación QEMU. Antes del primer
-# `docker compose up`, ejecutar UNA VEZ en el host:
+# StrategyQuant X solo tiene build oficial para x86_64. En este
+# host ARM64 se ejecuta vía emulación QEMU.
 #
-#   sudo apt update
-#   sudo apt install -y qemu-user-static binfmt-support
-#   sudo docker run --privileged --rm tonistiigi/binfmt --install amd64
+# *** PASO OBLIGATORIO ANTES DEL PRIMER DEPLOY EN DOKPLOY ***
 #
-# Verificación:
-#   docker run --rm --platform linux/amd64 ubuntu:22.04 uname -m
-#   # debe imprimir: x86_64
+# SSH a la VM Ampere A1 y correr UNA VEZ:
 #
-# Tras esto, `docker compose build --no-cache && docker compose up -d`
-# arrancará SQX emulado. El primer arranque tarda 1-3 min.
+#   cd /ruta/al/repo   # o donde tengas clonado
+#   sudo bash setup-host-arm64.sh
+#
+# El script:
+#   - Monta binfmt_misc si falta y lo persiste en /etc/fstab.
+#   - Instala qemu-user-static + binfmt-support.
+#   - Registra el emulador amd64 en el kernel.
+#   - Verifica que `docker run --platform linux/amd64 ... uname -m`
+#     imprime x86_64.
+#
+# Si el script termina con "OK", entonces redeploy desde Dokploy.
+# El build avanzará más allá del paso apt-get (que es donde fallaba
+# por exec format error).
+#
+# El registro binfmt sobrevive reboots gracias a binfmt-support y
+# systemd-binfmt. Si tras un reboot dejara de funcionar, vuelve a
+# correr el script.
 #
 # Performance esperada: 3x-10x más lento que x86 nativo. Si la GUI
 # se siente inutilizable, considera migrar a una VM Oracle x86 (E4.Flex).

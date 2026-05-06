@@ -2,9 +2,15 @@ version: "3.8"
 
 services:
   sqx:
+    # SQX solo distribuye binarios x86_64. En hosts ARM64 (Oracle Ampere A1)
+    # se ejecuta vía emulación QEMU. Requiere haber registrado binfmt amd64
+    # en el host una sola vez (ver notas al final del archivo).
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
       args:
         SQX_ZIP_URL: ${SQX_ZIP_URL}
     container_name: sqx
@@ -34,12 +40,16 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 2m
+      # 5 minutos: la emulación QEMU hace que el primer arranque
+      # de Electron + JRE x86 sobre ARM64 sea mucho más lento.
+      start_period: 5m
     deploy:
       resources:
         limits:
-          memory: 16G
-          cpus: "3"
+          # Host: Ampere A1 con 3 oCPU + 18GB RAM dedicados a esta instancia.
+          # Dejamos ~3GB libres al sistema y compartido con filebrowser.
+          memory: 14G
+          cpus: "2.8"
         reservations:
           memory: 2G
 
@@ -72,3 +82,25 @@ volumes:
   sqx_logs:
   sqx_config:
   sqx_filebrowser_cfg:
+
+# ------------------------------------------------------------
+# NOTAS DE DESPLIEGUE EN HOST ARM64 (Oracle Ampere A1)
+# ------------------------------------------------------------
+# StrategyQuant X solo tiene build oficial para x86_64. En esta
+# instancia ARM64 se ejecuta vía emulación QEMU. Antes del primer
+# `docker compose up`, ejecutar UNA VEZ en el host:
+#
+#   sudo apt update
+#   sudo apt install -y qemu-user-static binfmt-support
+#   sudo docker run --privileged --rm tonistiigi/binfmt --install amd64
+#
+# Verificación:
+#   docker run --rm --platform linux/amd64 ubuntu:22.04 uname -m
+#   # debe imprimir: x86_64
+#
+# Tras esto, `docker compose build --no-cache && docker compose up -d`
+# arrancará SQX emulado. El primer arranque tarda 1-3 min.
+#
+# Performance esperada: 3x-10x más lento que x86 nativo. Si la GUI
+# se siente inutilizable, considera migrar a una VM Oracle x86 (E4.Flex).
+# ------------------------------------------------------------

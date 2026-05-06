@@ -1,4 +1,8 @@
-FROM ubuntu:22.04
+# Forzamos plataforma x86_64 porque el binario de StrategyQuantX
+# (Electron + JRE empaquetado) solo tiene build oficial para amd64.
+# En hosts ARM64 (ej. Oracle Ampere A1) esto requiere qemu-user-static
+# + binfmt registrado (ver README/notas de despliegue).
+FROM --platform=linux/amd64 ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     SQX_HOME=/opt/sqx \
@@ -48,7 +52,10 @@ RUN test -n "${SQX_ZIP_URL}" || (echo "ERROR: SQX_ZIP_URL no está definido" && 
     && find ${SQX_HOME} -maxdepth 3 -name "*.sh" -exec chmod +x {} \; \
     && find ${SQX_HOME}/internal/electron -maxdepth 2 -type f -name "strategyquantx_ui*" -exec chmod +x {} \; 2>/dev/null || true
 
-ENV SQ_JVM_XMX=16g
+# Heap JVM. Bajado de 16g -> 12g por el overhead extra de memoria
+# que introduce QEMU al emular x86_64 sobre ARM64. Si corres en host
+# x86 nativo puedes subirlo de nuevo.
+ENV SQ_JVM_XMX=12g
 
 # Entrypoint
 COPY entrypoint.sh /entrypoint.sh
@@ -58,8 +65,9 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 8090 5901 5050
 
 # Healthcheck: verifica que noVNC y x11vnc respondan TCP.
-# start_period=2m da tiempo a SQX a arrancar la primera vez.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=2m --retries=3 \
+# start_period=5m porque bajo emulación QEMU (ARM64 -> amd64) el
+# arranque de Electron + JRE es notablemente más lento que en x86 nativo.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5m --retries=3 \
     CMD nc -z localhost 5901 && nc -z localhost 8090 || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

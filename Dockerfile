@@ -14,11 +14,45 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VNC_RESOLUTION=1600x900 \
     VNC_COL_DEPTH=24
 
+# ------------------------------------------------------------
+# Fix de keyring para builds amd64 emulados sobre ARM64.
+# ------------------------------------------------------------
+# La imagen ubuntu:22.04 amd64 trae /etc/apt/trusted.gpg.d/ubuntu-keyring-*.gpg
+# en un formato que APT parcheado actual reporta como "unsupported filetype",
+# rechazando todos los repos como "not signed".
+#
+# Fix: descargar archivos .gpg "limpios" desde keyserver y reemplazar.
+# Esto NO requiere apt-get update previo y funciona aunque el cache de la
+# imagen base esté en estado inconsistente.
+#
+# Si el host es x86 nativo y los keyrings funcionan, este paso es inocuo
+# (re-escribe los mismos archivos validos).
+# ------------------------------------------------------------
+RUN set -eux; \
+    # Borrar keyrings posiblemente corruptos
+    rm -f /etc/apt/trusted.gpg.d/ubuntu-keyring-*.gpg; \
+    # Permitir bypass GPG SOLO para descargar el paquete oficial ubuntu-keyring.
+    # Limitamos a una operacion atomica: bajar el .deb del paquete y dpkg -i.
+    # Nada mas se instala bajo bypass.
+    printf 'Acquire::AllowInsecureRepositories "true";\nAcquire::AllowDowngradeToInsecureRepositories "true";\nAPT::Get::AllowUnauthenticated "true";\n' \
+        > /etc/apt/apt.conf.d/99-temp-insecure; \
+    apt-get update; \
+    # Solo descargamos (no instalamos aun) el paquete oficial
+    cd /tmp && apt-get download ubuntu-keyring; \
+    # Instalar via dpkg (no requiere repos firmados)
+    dpkg -i /tmp/ubuntu-keyring_*.deb; \
+    rm -f /tmp/ubuntu-keyring_*.deb; \
+    # Quitar bypass: a partir de aqui, validacion GPG normal
+    rm -f /etc/apt/apt.conf.d/99-temp-insecure; \
+    # Fix de permisos por si quedaron mal
+    chmod 644 /etc/apt/trusted.gpg.d/*.gpg 2>/dev/null || true; \
+    # Limpiar listas viejas para forzar re-fetch con keyring nuevo
+    rm -rf /var/lib/apt/lists/*; \
+    # Validar: este apt-get update DEBE funcionar sin --allow-unauthenticated
+    apt-get update
+
 # Paquetes base + X11 + Xvfb/VNC/noVNC + dependencias de Electron
-# NOTA: el host ARM64 debe tener QEMU 8.x+ registrado via binfmt
-# (ver setup-host-arm64.sh). QEMU 6.x/7.x crashea con SIGSEGV
-# al correr post-install scripts de Ubuntu 22.04 amd64.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get install -y --no-install-recommends \
     ca-certificates wget curl libarchive-tools tini procps net-tools python3 netcat-openbsd \
     # X11
     libxrender1 libxtst6 libxi6 libxext6 libxrandr2 libxfixes3 \

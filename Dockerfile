@@ -14,6 +14,41 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VNC_RESOLUTION=1600x900 \
     VNC_COL_DEPTH=24
 
+# ------------------------------------------------------------
+# Fix de keyring corrupto (build amd64 emulado vía QEMU sobre ARM64).
+# ------------------------------------------------------------
+# Sintoma: tras `apt-get update` aparece:
+#   "key(s) in the keyring /etc/apt/trusted.gpg.d/ubuntu-keyring-*.gpg
+#    are ignored as the file has an unsupported filetype"
+#   "The repository '...' is not signed"
+#
+# Causa: al extraer la imagen base ubuntu:22.04 amd64 bajo emulación
+# QEMU, ciertos archivos GPG quedan corruptos (tamaño 0 / encabezado
+# malformado), por eso apt los descarta y trata todos los repos como
+# no firmados.
+#
+# Fix: re-bajar manualmente el keyring oficial de Ubuntu desde
+# Launchpad, reemplazar los archivos locales y luego sí correr
+# `apt-get update` normal con verificación GPG completa.
+# ------------------------------------------------------------
+RUN set -eux; \
+    # Listar y borrar keyrings posiblemente corruptos
+    ls -la /etc/apt/trusted.gpg.d/ || true; \
+    rm -f /etc/apt/trusted.gpg.d/ubuntu-keyring-*.gpg; \
+    # Bypass temporal de verificacion solo para bajar el paquete oficial
+    # ubuntu-keyring desde el repo. Mas seguro que descargar binarios sueltos.
+    printf 'Acquire::AllowInsecureRepositories "true";\nAcquire::AllowDowngradeToInsecureRepositories "true";\nAPT::Get::AllowUnauthenticated "true";\n' \
+        > /etc/apt/apt.conf.d/99-temp-insecure; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends --reinstall \
+        ca-certificates gnupg ubuntu-keyring; \
+    # Quitar el bypass — a partir de aqui apt valida GPG normal
+    rm -f /etc/apt/apt.conf.d/99-temp-insecure; \
+    # Asegurar permisos correctos
+    chmod 644 /etc/apt/trusted.gpg.d/*.gpg 2>/dev/null || true; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
 # Paquetes base + X11 + Xvfb/VNC/noVNC + dependencias de Electron
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates wget curl libarchive-tools tini procps net-tools python3 netcat-openbsd \

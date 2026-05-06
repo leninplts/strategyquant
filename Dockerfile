@@ -15,40 +15,74 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VNC_COL_DEPTH=24
 
 # ------------------------------------------------------------
-# Fix de keyring para builds amd64 emulados sobre ARM64.
+# Fix definitivo de APT para builds amd64 emulados sobre ARM64.
 # ------------------------------------------------------------
-# La imagen ubuntu:22.04 amd64 trae /etc/apt/trusted.gpg.d/ubuntu-keyring-*.gpg
-# en un formato que APT parcheado actual reporta como "unsupported filetype",
-# rechazando todos los repos como "not signed".
+# Sintoma persistente:
+#   "key(s) in the keyring /etc/apt/trusted.gpg.d/ubuntu-keyring-*.gpg
+#    are ignored as the file has an unsupported filetype"
+# Esto ocurre incluso tras reinstalar el paquete ubuntu-keyring via dpkg.
 #
-# Fix: descargar archivos .gpg "limpios" desde keyserver y reemplazar.
-# Esto NO requiere apt-get update previo y funciona aunque el cache de la
-# imagen base esté en estado inconsistente.
+# Causa raiz: bajo emulacion QEMU x86_64-on-aarch64, el binario gpgv
+# (2.2.x de jammy) tiene problemas leyendo el formato binario de los
+# keyrings .gpg incluso aunque los archivos esten correctos.
 #
-# Si el host es x86 nativo y los keyrings funcionan, este paso es inocuo
-# (re-escribe los mismos archivos validos).
+# Fix definitivo (estandar moderno de Debian/Ubuntu):
+#   1. Bajar las llaves publicas de Ubuntu en formato ASCII (.asc) desde
+#      keyserver.ubuntu.com via HTTPS.
+#   2. Convertirlas a keyrings binarios "limpios" usando gpg dearmor.
+#   3. Reescribir /etc/apt/sources.list usando "signed-by=" para anclar
+#      cada repo a su keyring especifico (recomendacion oficial APT 2.x).
+#
+# Esto evita por completo gpgv leyendo los .gpg legacy.
 # ------------------------------------------------------------
 RUN set -eux; \
-    # Borrar keyrings posiblemente corruptos
-    rm -f /etc/apt/trusted.gpg.d/ubuntu-keyring-*.gpg; \
-    # Permitir bypass GPG SOLO para descargar el paquete oficial ubuntu-keyring.
-    # Limitamos a una operacion atomica: bajar el .deb del paquete y dpkg -i.
-    # Nada mas se instala bajo bypass.
-    printf 'Acquire::AllowInsecureRepositories "true";\nAcquire::AllowDowngradeToInsecureRepositories "true";\nAPT::Get::AllowUnauthenticated "true";\n' \
+    # Activar bypass GPG global para todo este paso
+    printf 'APT::Get::AllowUnauthenticated "true";\nAcquire::AllowInsecureRepositories "true";\nAcquire::AllowDowngradeToInsecureRepositories "true";\n' \
         > /etc/apt/apt.conf.d/99-temp-insecure; \
+    # Quitar keyrings legacy que confunden a gpgv bajo QEMU
+    rm -f /etc/apt/trusted.gpg.d/ubuntu-keyring-*.gpg; \
+    rm -f /etc/apt/trusted.gpg /etc/apt/trusted.gpg.d/*.gpg~ 2>/dev/null || true; \
+    # Bajar e instalar gnupg2/curl/ca-certs sin verificacion (en este paso unico)
     apt-get update; \
-    # Solo descargamos (no instalamos aun) el paquete oficial
-    cd /tmp && apt-get download ubuntu-keyring; \
-    # Instalar via dpkg (no requiere repos firmados)
-    dpkg -i /tmp/ubuntu-keyring_*.deb; \
-    rm -f /tmp/ubuntu-keyring_*.deb; \
-    # Quitar bypass: a partir de aqui, validacion GPG normal
+    apt-get install -y --no-install-recommends --allow-unauthenticated \
+        gnupg2 curl ca-certificates; \
+    # Crear directorio moderno para keyrings con signed-by
+    install -d -m 0755 /etc/apt/keyrings; \
+    # Bajar la llave publica de Ubuntu Archive desde keyserver oficial.
+    # Key ID: 871920D1991BC93C (Ubuntu Archive Automatic Signing Key 2018).
+    # Reintentos por si keyserver tarda o falla momentaneamente.
+    for attempt in 1 2 3 4 5; do \
+        if curl -fsSL --max-time 30 \
+            "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x871920D1991BC93C" \
+            -o /tmp/ubuntu-archive.asc; then \
+            if [ -s /tmp/ubuntu-archive.asc ] && \
+               grep -q 'BEGIN PGP PUBLIC KEY' /tmp/ubuntu-archive.asc; then \
+                break; \
+            fi; \
+        fi; \
+        echo "Reintento $attempt: keyserver.ubuntu.com no respondio bien..."; \
+        sleep 3; \
+    done; \
+    # Verificar que tenemos un .asc valido
+    test -s /tmp/ubuntu-archive.asc; \
+    grep -q 'BEGIN PGP PUBLIC KEY' /tmp/ubuntu-archive.asc; \
+    # Convertir ASCII armored -> keyring binario en path nuevo
+    gpg --dearmor < /tmp/ubuntu-archive.asc > /etc/apt/keyrings/ubuntu-archive.gpg; \
+    rm -f /tmp/ubuntu-archive.asc; \
+    chmod 644 /etc/apt/keyrings/ubuntu-archive.gpg; \
+    # Reescribir sources.list anclando todos los repos al keyring nuevo
+    { \
+      echo "deb [signed-by=/etc/apt/keyrings/ubuntu-archive.gpg] http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse"; \
+      echo "deb [signed-by=/etc/apt/keyrings/ubuntu-archive.gpg] http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse"; \
+      echo "deb [signed-by=/etc/apt/keyrings/ubuntu-archive.gpg] http://archive.ubuntu.com/ubuntu/ jammy-backports main restricted universe multiverse"; \
+      echo "deb [signed-by=/etc/apt/keyrings/ubuntu-archive.gpg] http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse"; \
+    } > /etc/apt/sources.list; \
+    rm -f /etc/apt/sources.list.d/ubuntu.sources; \
+    # Quitar bypass: a partir de aqui apt valida GPG con keyring nuevo
     rm -f /etc/apt/apt.conf.d/99-temp-insecure; \
-    # Fix de permisos por si quedaron mal
-    chmod 644 /etc/apt/trusted.gpg.d/*.gpg 2>/dev/null || true; \
-    # Limpiar listas viejas para forzar re-fetch con keyring nuevo
     rm -rf /var/lib/apt/lists/*; \
-    # Validar: este apt-get update DEBE funcionar sin --allow-unauthenticated
+    # Validacion final: este apt-get update DEBE pasar firma GPG con la
+    # llave que descargamos del keyserver. Si falla, falla el build.
     apt-get update
 
 # Paquetes base + X11 + Xvfb/VNC/noVNC + dependencias de Electron

@@ -73,13 +73,19 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y --no-install-recommends qemu-user-static binfmt-support
 
-# 6. Limpiar registros previos (puede haber registros corruptos de intentos previos)
+# 6. Limpiar TODOS los registros previos de qemu (pueden ser viejos/buggy)
 echo "[4/6] Limpiando registros binfmt previos de qemu-x86_64..."
 docker run --privileged --rm tonistiigi/binfmt --uninstall qemu-x86_64 >/dev/null 2>&1 || true
+# Tambien quitar el qemu-user-static que apt instalo (suele ser version vieja
+# con bugs de SIGSEGV al ejecutar post-install scripts de Ubuntu 22.04 amd64)
+apt-get remove -y --purge qemu-user-static 2>/dev/null || true
 
-# 7. Registrar amd64 vía la imagen oficial de tonistiigi/binfmt
-echo "[5/6] Registrando emulador amd64 en el kernel..."
-docker run --privileged --rm tonistiigi/binfmt --install amd64
+# 7. Registrar amd64 con QEMU MODERNO (8.x+) via tonistiigi/binfmt
+# IMPORTANTE: usar tag "qemu-v8.1.5" o superior. La version "latest" a veces
+# trae qemu 7.x que tiene bugs con apt-get install de Ubuntu 22.04 amd64.
+# Sintoma del bug: "x86_64-binfmt-P: QEMU internal SIGSEGV {code=MAPERR}"
+echo "[5/6] Registrando emulador amd64 con QEMU 8.x (estable para Ubuntu 22.04)..."
+docker run --privileged --rm tonistiigi/binfmt:qemu-v8.1.5 --install amd64
 
 # Habilitar systemd-binfmt si existe (para que sobreviva reboots de forma limpia)
 if systemctl list-unit-files 2>/dev/null | grep -q systemd-binfmt; then

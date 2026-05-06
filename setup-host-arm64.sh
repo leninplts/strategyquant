@@ -67,34 +67,69 @@ if ! grep -q binfmt_misc /etc/fstab 2>/dev/null; then
     echo "binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc defaults 0 0" >> /etc/fstab
 fi
 
-# 5. Instalar paquetes necesarios
-echo "[3/6] Instalando qemu-user-static y binfmt-support..."
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y --no-install-recommends qemu-user-static binfmt-support
-
-# 6. Limpiar TODOS los registros previos de qemu (pueden ser viejos/buggy)
-echo "[4/6] Limpiando registros binfmt previos de qemu-x86_64..."
+# 5. Limpiar registros previos por si quedaron de intentos anteriores
+echo "[3/6] Limpiando registros binfmt previos..."
+# Quitar registros viejos por si quedaron a medias
 docker run --privileged --rm tonistiigi/binfmt --uninstall qemu-x86_64 >/dev/null 2>&1 || true
-# Tambien quitar el qemu-user-static que apt instalo (suele ser version vieja
-# con bugs de SIGSEGV al ejecutar post-install scripts de Ubuntu 22.04 amd64)
-apt-get remove -y --purge qemu-user-static 2>/dev/null || true
-
-# 7. Registrar amd64 con QEMU MODERNO (8.x+) via tonistiigi/binfmt
-# IMPORTANTE: usar tag "qemu-v8.1.5" o superior. La version "latest" a veces
-# trae qemu 7.x que tiene bugs con apt-get install de Ubuntu 22.04 amd64.
-# Sintoma del bug: "x86_64-binfmt-P: QEMU internal SIGSEGV {code=MAPERR}"
-echo "[5/6] Registrando emulador amd64 con QEMU 8.x (estable para Ubuntu 22.04)..."
-docker run --privileged --rm tonistiigi/binfmt:qemu-v8.1.5 --install amd64
-
-# Habilitar systemd-binfmt si existe (para que sobreviva reboots de forma limpia)
-if systemctl list-unit-files 2>/dev/null | grep -q systemd-binfmt; then
-    systemctl enable systemd-binfmt 2>/dev/null || true
-    systemctl restart systemd-binfmt 2>/dev/null || true
+# Vaciar registro del kernel (sobrevive a reinstalar qemu-user-static)
+if [ -f /proc/sys/fs/binfmt_misc/qemu-x86_64 ]; then
+    echo -1 > /proc/sys/fs/binfmt_misc/qemu-x86_64 2>/dev/null || true
 fi
 
-# 8. Verificar funcionamiento
-echo "[6/6] Verificando emulacion (puede tardar la primera vez)..."
+# 6. Reinstalar paquetes oficiales de Ubuntu (24.04 trae qemu 8.2.2 que NO
+# tiene el bug del SIGSEGV en MAPERR. Usamos los paquetes nativos del SO
+# en lugar de tonistiigi/binfmt porque en Ubuntu 24.04 systemd-binfmt
+# sobrescribe registros runtime y choca con tonistiigi.)
+echo "[4/6] Instalando qemu-user-static y binfmt-support desde apt..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y --no-install-recommends --reinstall \
+    qemu-user-static binfmt-support
+
+# 7. Activar systemd-binfmt (camino oficial Ubuntu 24.04)
+# qemu-user-static instala /usr/lib/binfmt.d/qemu-*.conf
+# systemd-binfmt los lee y registra en /proc/sys/fs/binfmt_misc/
+echo "[5/6] Activando systemd-binfmt para registrar emuladores..."
+if systemctl list-unit-files 2>/dev/null | grep -q systemd-binfmt; then
+    systemctl enable systemd-binfmt 2>/dev/null || true
+    systemctl restart systemd-binfmt
+    sleep 2
+fi
+
+# Fallback manual: si systemd-binfmt no registra qemu-x86_64,
+# lo registramos directamente desde /usr/lib/binfmt.d/
+if [ ! -f /proc/sys/fs/binfmt_misc/qemu-x86_64 ]; then
+    echo "    systemd-binfmt no registro qemu-x86_64, registrando manual..."
+    if [ -f /usr/lib/binfmt.d/qemu-x86_64.conf ]; then
+        # El formato de los .conf es directamente compatible con register
+        cat /usr/lib/binfmt.d/qemu-x86_64.conf > /proc/sys/fs/binfmt_misc/register || true
+    elif [ -f /var/lib/binfmts/qemu-x86_64 ]; then
+        update-binfmts --enable qemu-x86_64 || true
+    fi
+fi
+
+# 8. Diagnostico previo a la verificacion
+echo "[6/6] Verificando emulacion..."
+echo "    Registros binfmt actuales:"
+ls /proc/sys/fs/binfmt_misc/ 2>/dev/null | sed 's/^/      /'
+echo ""
+if [ -f /proc/sys/fs/binfmt_misc/qemu-x86_64 ]; then
+    echo "    Detalle de qemu-x86_64:"
+    cat /proc/sys/fs/binfmt_misc/qemu-x86_64 | sed 's/^/      /'
+    echo ""
+else
+    echo "    AVISO: /proc/sys/fs/binfmt_misc/qemu-x86_64 no existe."
+fi
+
+echo "    Verificando version del binario qemu:"
+if [ -x /usr/bin/qemu-x86_64-static ]; then
+    /usr/bin/qemu-x86_64-static --version | head -1 | sed 's/^/      /'
+else
+    echo "      WARN: /usr/bin/qemu-x86_64-static no encontrado"
+fi
+echo ""
+
+echo "    Test de ejecucion (puede tardar 5-10s la primera vez)..."
 RESULT=$(docker run --rm --platform linux/amd64 ubuntu:22.04 uname -m 2>&1 || true)
 echo "    Resultado: $RESULT"
 
@@ -104,7 +139,7 @@ if echo "$RESULT" | grep -q x86_64; then
     echo "============================================================"
     echo ""
     echo "Siguiente paso: en Dokploy, redeploy la app StrategyQuant."
-    echo "El build deberia avanzar mas alla del paso [2/6] apt-get."
+    echo "El build deberia avanzar mas alla del apt-get."
     echo ""
     echo "Recuerda: el primer arranque de SQX bajo emulacion tarda 1-3 min."
     exit 0
@@ -113,11 +148,6 @@ else
     echo ">>> ERROR: la emulacion no quedo activa"
     echo "============================================================"
     echo ""
-    echo "Diagnostico:"
-    echo "  ls /proc/sys/fs/binfmt_misc/"
-    ls /proc/sys/fs/binfmt_misc/ 2>/dev/null || echo "  (vacio o no existe)"
-    echo ""
-    echo "Si /proc/sys/fs/binfmt_misc/ no tiene 'qemu-x86_64', el registro fallo."
-    echo "Reporta el output completo."
+    echo "Pegame todo el output (incluido el diagnostico de arriba) para diagnosticar."
     exit 1
 fi
